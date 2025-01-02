@@ -20,7 +20,6 @@ def run_fastqc(input_file, output_dir):
     ])
 
 # Step 2: Run HUMAnN3
-
 def run_humann(input_file, output_dir, threads):
     print("Running HUMAnN3...")
     subprocess.run([
@@ -64,4 +63,4 @@ run_humann(input_fastq, output_dir, threads)
 join_and_normalize_tables(output_dir)
 generate_summaries(output_dir)
 
-print("HUMAnN3 analysis complete! Results saved in:xxxx folder", output_dir)
+print("HUMAnN3 analysis complete! Results saved in:", output_dir)
