@@ -1,0 +1,67 @@
+import subprocess
+import os
+
+# Define file paths and parameters
+input_fastq = "path/to/your/input.fastq"  # Input FASTQ file
+output_dir = "path/to/output_directory"  # Output directory
+threads = 8  # Number of threads for parallel processing
+
+# Ensure output directory exists
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+
+# Step 1: Quality control (optional, using FastQC as an example)
+def run_fastqc(input_file, output_dir):
+    print("Running FastQC for quality control...")
+    subprocess.run([
+        "fastqc",
+        "--outdir", output_dir,
+        input_file
+    ])
+
+# Step 2: Run HUMAnN3
+
+def run_humann(input_file, output_dir, threads):
+    print("Running HUMAnN3...")
+    subprocess.run([
+        "humann",
+        "--input", input_file,
+        "--output", output_dir,
+        "--threads", str(threads)
+    ])
+
+# Step 3: Post-processing (optional - joining and normalizing tables)
+def join_and_normalize_tables(output_dir):
+    print("Joining and normalizing tables...")
+    # Join tables
+    subprocess.run([
+        "humann_join_tables",
+        "--input", output_dir,
+        "--output", os.path.join(output_dir, "joined_tables.tsv")
+    ])
+
+    # Normalize tables
+    subprocess.run([
+        "humann_renorm_table",
+        "--input", os.path.join(output_dir, "joined_tables.tsv"),
+        "--output", os.path.join(output_dir, "normalized_tables.tsv"),
+        "--units", "relab"
+    ])
+
+# Step 4: Generate taxonomy and pathway summaries (optional)
+def generate_summaries(output_dir):
+    print("Generating taxonomy and pathway summaries...")
+    # Taxonomy summary
+    subprocess.run([
+        "humann_barplot",
+        "--input", os.path.join(output_dir, "normalized_tables.tsv"),
+        "--output", os.path.join(output_dir, "taxonomy_barplot.pdf")
+    ])
+
+# Run the pipeline
+run_fastqc(input_fastq, output_dir)
+run_humann(input_fastq, output_dir, threads)
+join_and_normalize_tables(output_dir)
+generate_summaries(output_dir)
+
+print("HUMAnN3 analysis complete! Results saved in:xxxx folder", output_dir)
