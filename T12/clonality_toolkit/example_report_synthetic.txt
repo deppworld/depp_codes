@@ -1,0 +1,82 @@
+==============================================================================
+CLONALITY ASSESSMENT  T1 vs T2
+==============================================================================
+T1: synthetic/T1.bam  purity=0.75
+T2: synthetic/T2.bam  purity=0.3
+Normal VCF: NONE (germline inferred heuristically - weaker)
+
+------------------------------------------------------------------------------
+STEP 0  SAMPLE IDENTITY (same patient?)
+  het SNPs evaluated in both BAMs : 28
+  hom-ref vs hom-alt discordances : 0
+  fraction absent in one sample   : 0.036
+  Genotypes concordant: consistent with the same patient.
+
+------------------------------------------------------------------------------
+STEP 1-4  VARIANT OVERLAP (after force-calling both BAMs)
+  germline-like (excluded)  : 25
+  possible CHIP (excluded)  : 0
+  SHARED somatic            : 5  (private/non-hotspot: 2, hotspot: 3)
+     of which rescued in T2 by force-calling (missed by caller): 1
+     of which rescued in T1 by force-calling                  : 0
+  T1-private somatic        : 1
+  T2-private somatic        : 1
+
+  Shared variants:
+  key                          gene      p.                  VAF_T1  VAF_T2 CCF_T1 CCF_T2  class
+  1:27100000:G:A               ARID1A    p.(E1000K)           0.393   0.123   1.05   0.82  PRIVATE
+  3:41266137:C:T               CTNNB1    p.(S45F)             0.347   0.163   0.92   1.09  HOTSPOT
+  9:35000000:A:G               MLLT3     p.(P45L)             0.333   0.027   0.89   0.18  PRIVATE (rescued)
+  1:115256529:T:C              NRAS      p.(Q61R)             0.323   0.150   0.86   1.00  HOTSPOT
+  17:7577120:C:T               TP53      p.(R273H)            0.657   0.207   1.50   1.38  HOTSPOT
+
+  T1-private variants:
+  17:41244000:T:G              BRCA1     p.(K1000N)         VAF_T1=0.147 VAF_T2=0.000 CCF_T1=0.39
+
+  T2-private variants:
+  3:178936091:G:A              PIK3CA    p.(E545K)          VAF_T1=0.000 VAF_T2=0.080 CCF_T2=0.53
+
+------------------------------------------------------------------------------
+STEP 6  CLONALITY LIKELIHOOD (same clone vs independent tumors)
+  log10 LR = 16.89   (>=3 strong, 1-3 moderate, <1 uninformative)
+  Verdict: CLONALLY RELATED (same neoplasm / subclone / metastasis)
+  NOTE: 1 shared variant(s) were NOT called in T2 by the pipeline but are present in T2 reads; the T2 caller was limited by purity 0.3.
+
+------------------------------------------------------------------------------
+STEP 7  9p21 (CDKN2A / CDKN2B / MTAP) COPY NUMBER
+  gene     T1 ratio  T1 abs CN   T2 ratio  T2 abs CN   (purity-corrected)
+  MTAP         0.32       0.18       0.79       0.57
+  CDKN2A       0.32       0.18       0.76       0.42
+  CDKN2B       0.32       0.19       0.78       0.57
+  deleted-target span T1: (21829940, 22007060)
+  deleted-target span T2: (21829940, 22007060)
+  Deletion boundaries MATCH at target resolution -> supports common origin
+  Plot: cn_9p21_profile.png ; table: cn_9p21_targets.tsv
+  Purity reconciliation formula: absCN = (2*ratio - 2*(1-purity)) / purity
+    e.g. ratio 0.32 at purity 0.75 -> CN 0.19; ratio 0.77 at purity 0.30 -> CN 0.47
+    (both ~0 => same homozygous deletion seen through different purity)
+
+------------------------------------------------------------------------------
+STEP 8  ALLELIC IMBALANCE / LOH LANDSCAPE (germline het SNPs, mirrored BAF by arm)
+  arms evaluated: 4   correlation of mBAF(T1) vs mBAF(T2): 0.09
+  arm    n   mBAF_T1  mBAF_T2
+  1p       9   0.042    0.067
+  3p       6   0.042    0.013
+  17p      7   0.017    0.050
+  9p       6   0.013    0.025
+  Shared arms with high mBAF in both samples = shared LOH events (clonal evidence).
+  Low mBAF in T2 across the board is expected at low purity and is NOT evidence against.
+  Table: allelic_imbalance_by_arm.tsv
+
+------------------------------------------------------------------------------
+HOW TO READ THIS
+  * >=2 shared PRIVATE (non-hotspot) somatic variants with matching CCF = one neoplasm.
+  * Shared hotspot(s) only = weak evidence; go to WES / methylation array / 9p21 breakpoint.
+  * Zero shared variants with >=4 confident private variants in each = independent primaries,
+    PROVIDED T2 purity is high enough that a clonal variant would have been seen
+    (at purity 0.30 a clonal heterozygous variant is expected at VAF ~0.15).
+  * GIS, TMB, MSI and CDKN2A ratio differences track purity, not biology; do not use them.
+  * HLA type is germline; identical HLA is uninformative. HLA LOH (LOHHLA) can be subclonal.
+  * Lineage call: SF-1 (ACC) vs WT1/D2-40/CK5-6/BAP1-loss (mesothelioma); shared CTNNB1/ZNRF3
+    favours ACC, shared BAP1/NF2 favours mesothelioma. Methylation classifier settles lineage.
+==============================================================================
