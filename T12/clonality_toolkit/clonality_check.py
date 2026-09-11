@@ -217,6 +217,52 @@ def parse_cvo(path):
     return df
 
 
+def parse_tmb_trace(path, min_pop_alleles=5):
+    """Parse a TSO500 TMB trace TSV (<sample>_TMB_Trace.tsv or <sample>.dna.tmb.trace.tsv).
+
+    Returns (germline_keys, somatic_keys).  A variant is germline if any
+    'GermlineFilter*' column is True, or if population allele counts
+    (gnomAD exome/genome, 1000G) reach min_pop_alleles.
+    """
+    germ, som = set(), set()
+    if path is None:
+        return germ, som
+    with open_text(path) as fh:
+        header = None
+        for line in fh:
+            line = line.rstrip("\n")
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if header is None:
+                header = parts
+                hl = [h.lower() for h in header]
+                gcols = [i for i, h in enumerate(hl) if "germlinefilter" in h]
+                pcols = [i for i, h in enumerate(hl) if "allelecount" in h and ("gnomad" in h or "1000" in h)]
+                try:
+                    ic = next(i for i, h in enumerate(hl) if h in ("chromosome", "chrom", "chr"))
+                    ip = next(i for i, h in enumerate(hl) if h in ("position", "pos", "genomic position"))
+                    ir = next(i for i, h in enumerate(hl) if h in ("refcall", "ref", "reference call"))
+                    ia = next(i for i, h in enumerate(hl) if h in ("altcall", "alt", "alternative call"))
+                except StopIteration:
+                    log(f"TMB trace {path}: could not find chrom/pos/ref/alt columns; ignored")
+                    return germ, som
+                continue
+            if len(parts) < len(header):
+                continue
+            key = f"{norm_chrom(parts[ic])}:{parts[ip]}:{parts[ir]}:{parts[ia]}"
+            is_germ = any(parts[i].strip().lower() in ("true", "1", "yes") for i in gcols)
+            for i in pcols:
+                try:
+                    if float(parts[i]) >= min_pop_alleles:
+                        is_germ = True
+                except ValueError:
+                    pass
+            (germ if is_germ else som).add(key)
+    log(f"TMB trace {os.path.basename(path)}: {len(germ)} germline-flagged, {len(som)} somatic-classified")
+    return germ, som
+
+
 def load_hotspots(path):
     if path is None:
         return DEFAULT_HOTSPOTS
@@ -550,6 +596,10 @@ def main():
     ap.add_argument("--normal-vcf", default=None, help="matched germline VCF (blood/normal)")
     ap.add_argument("--t1-cvo", default=None, help="TSO500 CombinedVariantOutput.tsv for T1")
     ap.add_argument("--t2-cvo", default=None, help="TSO500 CombinedVariantOutput.tsv for T2")
+    ap.add_argument("--t1-tmb-trace", default=None, help="TSO500 TMB trace TSV for T1 (germline flags)")
+    ap.add_argument("--t2-tmb-trace", default=None, help="TSO500 TMB trace TSV for T2 (germline flags)")
+    ap.add_argument("--germline-purity-margin", type=float, default=0.10,
+                    help="VAF above (purity + margin) in either sample => germline (set 1.0 to disable)")
     ap.add_argument("--purity1", type=float, required=True, help="tumor purity T1 (0-1), from pathology or ploidy tool")
     ap.add_argument("--purity2", type=float, required=True, help="tumor purity T2 (0-1)")
     ap.add_argument("--targets", default=None, help="panel target BED (needed for 9p21 CN step)")
@@ -564,7 +614,7 @@ def main():
     ap.add_argument("--force-min-vaf", type=float, default=0.005)
     ap.add_argument("--min-bq", type=int, default=20)
     ap.add_argument("--min-mq", type=int, default=20)
-    ap.add_argument("--germline-vaf-band", type=float, nargs=2, default=(0.40, 0.60),
+    ap.add_argument("--germline-vaf-band", type=float, nargs=2, default=(0.35, 0.65),
                     help="VAF band in BOTH samples that flags a variant as likely germline when no normal is given")
     ap.add_argument("--no-pass-only", action="store_true", help="also consider non-PASS calls")
     ap.add_argument("--out", default="clonality_out")
@@ -636,14 +686,28 @@ def main():
         n = parse_vcf(a.normal_vcf, "N", min_dp=10, min_alt=2, min_vaf=0.15, pass_only=False)
         normal_keys = set(n.key)
     allv["in_normal"] = allv.key.isin(normal_keys)
+    g1, s1 = parse_tmb_trace(a.t1_tmb_trace)
+    g2, s2 = parse_tmb_trace(a.t2_tmb_trace)
+    allv["tso500_germline"] = allv.key.isin(g1 | g2)
 
     # ---- Step 3: force-call ----------------------------------------------------
     log(f"Step 3/8: force-calling {len(allv)} variants in both BAMs")
     allv = force_call(allv, bam1, bam2, a.min_bq, a.min_mq)
     lo, hi = a.germline_vaf_band
-    allv["germline_like"] = allv.in_normal | (
+    # Purity-aware rule: a somatic VAF cannot exceed the sample's purity (except with
+    # mutant-allele amplification), whereas germline VAFs are purity-independent.
+    # A variant above purity+margin in EITHER sample is treated as germline unless it
+    # is a known hotspot (hotspot check happens below, so we exclude those afterwards).
+    m = a.germline_purity_margin
+    over_purity = (allv.vaf_T1 > a.purity1 + m) | (allv.vaf_T2 > a.purity2 + m)
+    allv["germline_like"] = allv.in_normal | allv.tso500_germline | (
         allv.vaf_T1.between(lo, hi) & allv.vaf_T2.between(lo, hi)) | (
-        (allv.vaf_T1 > 0.9) & (allv.vaf_T2 > 0.9))
+        (allv.vaf_T1 > 0.85) & (allv.vaf_T2 > 0.85)) | over_purity
+    allv["hotspot_freq"] = [hotspot_freq(g, p, c, hotspots) for g, p, c in zip(allv.gene, allv.pdot, allv.cdot)]
+    allv["hotspot_freq"] = allv.hotspot_freq.astype(float)
+    is_hot = allv.hotspot_freq.notna()
+    # hotspot drivers with LOH / amplification may legitimately exceed purity: keep them
+    allv.loc[is_hot & over_purity & ~allv.in_normal & ~allv.tso500_germline, "germline_like"] = False
     allv["chip_flag"] = allv.gene.isin(CHIP_GENES) & (allv.vaf_T1 < 0.05) & (allv.vaf_T2 < 0.05) & \
         ((allv.vaf_T1 - allv.vaf_T2).abs() < 0.02) & (allv.alt_T1 >= 3) & (allv.alt_T2 >= 3)
 
@@ -654,8 +718,6 @@ def main():
     allv["status"] = np.select(
         [allv.germline_like, present1 & present2, present1 & ~present2, ~present1 & present2],
         ["GERMLINE_LIKE", "SHARED", "T1_PRIVATE", "T2_PRIVATE"], default="UNSUPPORTED")
-    allv["hotspot_freq"] = [hotspot_freq(g, p, c, hotspots) for g, p, c in zip(allv.gene, allv.pdot, allv.cdot)]
-    allv["hotspot_freq"] = allv.hotspot_freq.astype(float)
     allv["variant_class"] = np.where(allv.hotspot_freq.notna(), "HOTSPOT", "PRIVATE")
     # 'present in T2 only by force-calling' = caller missed it (typical for low purity)
     allv["rescued_in_T2"] = allv["vaf_T2_called"].isna() & present2 & present1
@@ -673,7 +735,7 @@ def main():
     cols = ["key", "gene", "pdot", "consequence", "status", "variant_class", "hotspot_freq",
             "vaf_T1_called", "vaf_T2_called", "dp_T1", "alt_T1", "vaf_T1", "dp_T2", "alt_T2", "vaf_T2",
             "ccf_T1", "ccf_T2", "clonal_T1", "clonal_T2", "rescued_in_T1", "rescued_in_T2",
-            "in_normal", "germline_like", "chip_flag", "filter_T1", "filter_T2"]
+            "in_normal", "tso500_germline", "germline_like", "chip_flag", "filter_T1", "filter_T2"]
     allv = allv[cols].sort_values(["status", "gene", "key"])
     allv.to_csv(os.path.join(a.out, "variants_T1_T2.tsv"), sep="\t", index=False, float_format="%.4f")
 
@@ -684,7 +746,9 @@ def main():
 
     R("-" * 78)
     R("STEP 1-4  VARIANT OVERLAP (after force-calling both BAMs)")
-    R(f"  germline-like (excluded)  : {int((allv.status == 'GERMLINE_LIKE').sum())}")
+    R(f"  germline-like (excluded)  : {int((allv.status == 'GERMLINE_LIKE').sum())}  "
+      f"(TSO500-flagged {int(allv.tso500_germline.sum())}, in normal {int(allv.in_normal.sum())}, "
+      f"VAF>purity+{a.germline_purity_margin:.2f} or germline VAF band: rest)")
     R(f"  possible CHIP (excluded)  : {int(allv.chip_flag.sum())}")
     R(f"  SHARED somatic            : {len(shared)}  "
       f"(private/non-hotspot: {int((shared.variant_class == 'PRIVATE').sum())}, "

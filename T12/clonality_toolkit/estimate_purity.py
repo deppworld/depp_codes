@@ -35,16 +35,18 @@ import pysam
 
 sys.path.insert(0, __import__("os").path.dirname(__file__))
 try:
-    from clonality_check import parse_cvo, norm_chrom  # reuse the CVO parser
+    from clonality_check import parse_cvo, norm_chrom, parse_tmb_trace  # reuse parsers
 except Exception:  # standalone fallback
     parse_cvo = None
+    parse_tmb_trace = None
 
     def norm_chrom(c):
         c = str(c)
         return c[3:] if c.lower().startswith("chr") else c
 
 
-def somatic_vafs(vcf_path, min_dp=50, min_alt=5):
+def somatic_vafs(vcf_path, min_dp=50, min_alt=5, germline_keys=frozenset(), somatic_keys=frozenset(),
+                 vaf_ceiling=0.80):
     vf = pysam.VariantFile(vcf_path)
     out = []
     for rec in vf:
@@ -68,10 +70,16 @@ def somatic_vafs(vcf_path, min_dp=50, min_alt=5):
             continue
         if ad and len(ad) > 1 and ad[1] < min_alt:
             continue
-        # drop germline-looking VAFs
-        if 0.40 <= af <= 0.60 or af > 0.90:
+        key = f"{norm_chrom(rec.chrom)}:{rec.pos}:{rec.ref}:{rec.alts[0]}"
+        if key in germline_keys:
             continue
-        out.append((f"{norm_chrom(rec.chrom)}:{rec.pos}:{rec.ref}:{rec.alts[0]}", float(af), int(dp)))
+        if somatic_keys and key not in somatic_keys:
+            # a TMB trace was given: restrict to variants TSO500 itself classified as somatic
+            continue
+        # drop germline-looking VAFs (het band, homozygous)
+        if 0.40 <= af <= 0.60 or af > vaf_ceiling:
+            continue
+        out.append((key, float(af), int(dp)))
     return out
 
 
@@ -106,6 +114,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--vcf", required=True, help="hard-filtered small-variant VCF")
     ap.add_argument("--cvo", default=None, help="CombinedVariantOutput.tsv (for gene names)")
+    ap.add_argument("--tmb-trace", default=None,
+                    help="TSO500 TMB trace TSV (<sample>_TMB_Trace.tsv); strongly recommended - "
+                         "supplies TSO500's own germline classification")
     ap.add_argument("--cnv-vcf", default=None, help="DRAGEN CNV VCF to read fold changes from")
     ap.add_argument("--del-ratio", action="append", default=[],
                     help="GENE=ratio for a homozygously deleted gene, e.g. CDKN2A=0.32 (repeatable)")
@@ -138,7 +149,11 @@ def main():
             print(f"   {g:<8s} ratio {r:.2f}  ->  not deleted enough to use")
 
     # ---- B. VAF method ---------------------------------------------------------
-    vafs = somatic_vafs(a.vcf)
+    gk, sk = (parse_tmb_trace(a.tmb_trace) if (a.tmb_trace and parse_tmb_trace) else (set(), set()))
+    vafs = somatic_vafs(a.vcf, germline_keys=gk, somatic_keys=sk)
+    if not a.tmb_trace:
+        print("\n   WARNING: no --tmb-trace given. In a tumor-only VCF most variants are germline SNPs;")
+        print("            the VAF method below is unreliable without it. Prefer method A.")
     ann = {}
     if a.cvo and parse_cvo:
         c = parse_cvo(a.cvo)
@@ -155,8 +170,14 @@ def main():
                   f"treated under method C")
             top = v[1]
         peak = v[(v >= top - 0.08) & (v <= top + 0.001)]
-        estB = 2 * float(np.median(peak))
-        print(f"   clonal VAF peak (n={len(peak)}): median {np.median(peak):.3f}  ->  purity ~ {min(estB,1):.2f}")
+        peak_med = float(np.median(peak))
+        if peak_med > 0.5:
+            print(f"   clonal VAF peak median {peak_med:.3f} > 0.5: IMPOSSIBLE for heterozygous somatic variants.")
+            print("   These are germline SNPs leaking through. Supply --tmb-trace or a normal VCF. Method B skipped.")
+            estB = None
+        else:
+            estB = min(2 * peak_med, 1.0)
+            print(f"   clonal VAF peak (n={len(peak)}): median {peak_med:.3f}  ->  purity ~ {estB:.2f}")
         print(f"   2 x 90th percentile VAF        :  {min(2*np.percentile(v,90),1):.2f}  (upper bound)")
         print("   top variants:")
         for k, af, dp in sorted(vafs, key=lambda x: -x[1])[:8]:
@@ -178,7 +199,7 @@ def main():
 
     # ---- consensus -----------------------------------------------------------------
     print("\n" + "-" * 70)
-    cands = [p for p in estA] + ([estB] if estB else [])
+    cands = [min(p, 1.0) for p in estA] + ([estB] if estB else [])
     if cands:
         cons = float(np.median(cands))
         lo, hi = min(cands), max(cands)
