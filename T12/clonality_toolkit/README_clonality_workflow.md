@@ -13,7 +13,14 @@ files themselves, and nothing is transmitted.
 
 Install: `pip install pysam pandas numpy matplotlib scipy` (samtools/tabix recommended).
 Smoke test: `python3 make_synthetic_test.py demo && python3 clonality_check.py --t1-vcf demo/T1.vcf.gz --t2-vcf demo/T2.vcf.gz --t1-bam demo/T1.bam --t2-bam demo/T2.bam --purity1 0.75 --purity2 0.30 --targets demo/targets.bed --t1-cvo demo/T1_CombinedVariantOutput.tsv --t2-cvo demo/T2_CombinedVariantOutput.tsv --out demo/out`
-
+Run command:
+python3 clonality_check.py \
+   --t1-vcf T1.dna.hard-filtered.vcf  --t2-vcf T2.dna.hard-filtered.vcf \
+   --t1-bam T1.dna.bam                --t2-bam T2.dna.bam \
+   --t1-cvo T1_CombinedVariantOutput.tsv --t2-cvo T2_CombinedVariantOutput.tsv \
+   --targets TSO500_targets.bed --genome hg19 \
+   --purity1 0.70 --purity2 0.30 \
+   --out results
 ## Inputs from the TSO500 run folder
 
 * BAM + BAI for T1 and T2 (`Logs_Intermediates/StitchedRealigned/<sample>/<sample>.bam` or the DRAGEN `*.bam`)
