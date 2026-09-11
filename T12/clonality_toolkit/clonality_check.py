@@ -570,8 +570,11 @@ def het_snp_candidates(vcf_paths, min_dp=50):
     return cand
 
 
-def identity_and_baf(cand, bam1, bam2, outdir, min_bq, min_mq, max_snps=3000):
-    keys = list(cand.keys())[:max_snps]
+def identity_and_baf(cand, bam1, bam2, outdir, min_bq, min_mq, max_snps=800):
+    keys = list(cand.keys())
+    if len(keys) > max_snps:
+        step = len(keys) / max_snps
+        keys = [keys[int(i * step)] for i in range(max_snps)]
     rows = []
     for k in keys:
         chrom, pos, ref, alt = cand[k]
@@ -718,8 +721,19 @@ def main():
     allv["tso500_germline"] = allv.key.isin(g1 | g2)
 
     # ---- Step 3: force-call ----------------------------------------------------
-    log(f"Step 3/8: force-calling {len(allv)} variants in both BAMs")
-    allv = force_call(allv, bam1, bam2, a.min_bq, a.min_mq)
+    # Force-call only variants not already known to be germline (TSO500 flags / normal VCF).
+    # Known-germline variants keep their caller VAFs; this cuts runtime ~10x on deep BAMs.
+    todo = ~(allv.tso500_germline | allv.in_normal)
+    log(f"Step 3/8: force-calling {int(todo.sum())} candidate somatic variants in both BAMs "
+        f"({int((~todo).sum())} known-germline variants skipped)")
+    fc = force_call(allv[todo].copy(), bam1, bam2, a.min_bq, a.min_mq)
+    for lab in ("T1", "T2"):
+        allv[f"ref_{lab}"] = 0
+        allv[f"alt_{lab}"] = 0
+        allv[f"dp_{lab}"] = allv[f"dp_{lab}_called"].fillna(0).astype(int)
+        allv[f"vaf_{lab}"] = allv[f"vaf_{lab}_called"].fillna(0.0)
+        for col in ("ref", "alt", "dp", "vaf"):
+            allv.loc[todo, f"{col}_{lab}"] = fc[f"{col}_{lab}"].values
     lo, hi = a.germline_vaf_band
     # Purity-aware rule: a somatic VAF cannot exceed the sample's purity (except with
     # mutant-allele amplification), whereas germline VAFs are purity-independent.
