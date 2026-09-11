@@ -13,6 +13,8 @@ files themselves, and nothing is transmitted.
  'estimate_purity.py'  estimate purity from the sequencing data
  	
 Install: `pip install pysam pandas numpy matplotlib scipy` (samtools/tabix recommended).
+
+
 Smoke test: `python3 make_synthetic_test.py demo && python3 clonality_check.py --t1-vcf demo/T1.vcf.gz --t2-vcf demo/T2.vcf.gz --t1-bam demo/T1.bam --t2-bam demo/T2.bam --purity1 0.75 --purity2 0.30 --targets demo/targets.bed --t1-cvo demo/T1_CombinedVariantOutput.tsv --t2-cvo demo/T2_CombinedVariantOutput.tsv --out demo/out`
 
 
