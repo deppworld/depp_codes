@@ -22,6 +22,7 @@ python3 estimate_purity.py --vcf T1.dna.hard-filtered.vcf --cvo T1_CombinedVaria
 python3 estimate_purity.py --vcf T2.dna.hard-filtered.vcf --cvo T2_CombinedVariantOutput.tsv --tmb-trace T2_TMB_Trace.tsv --del-ratio CDKN2A=0.77 --del-ratio CDKN2B=0.84
 ## Run Script: 
 Based on estimated purity (T1 70 and T2 25)
+
 python3 clonality_check.py --t1-vcf T1.dna.hard-filtered.vcf --t2-vcf T2.dna.hard-filtered.vcf --t1-bam T1.dna.bam --t2-bam T2.dna.bam --t1-cvo T1_CombinedVariantOutput.tsv --t2-cvo T2_CombinedVariantOutput.tsv --t1-tmb-trace T1_TMB_Trace.tsv --t2-tmb-trace T2_TMB_Trace.tsv --targets TSO500_targets.bed --purity1 0.66 --purity2 0.20 --out results
 
 
