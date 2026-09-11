@@ -10,11 +10,19 @@ files themselves, and nothing is transmitted.
 | `clonality_check.py` | the analysis (Python 3, needs `pysam pandas numpy matplotlib`) |
 | `run_clonality.sh` | wrapper: edit the variables block, run once |
 | `make_synthetic_test.py` | builds a toy T1/T2 dataset so you can verify the install before touching patient data |
-
+ 'estimate_purity.py'  estimate purity from the sequencing data
+ 	
 Install: `pip install pysam pandas numpy matplotlib scipy` (samtools/tabix recommended).
 Smoke test: `python3 make_synthetic_test.py demo && python3 clonality_check.py --t1-vcf demo/T1.vcf.gz --t2-vcf demo/T2.vcf.gz --t1-bam demo/T1.bam --t2-bam demo/T2.bam --purity1 0.75 --purity2 0.30 --targets demo/targets.bed --t1-cvo demo/T1_CombinedVariantOutput.tsv --t2-cvo demo/T2_CombinedVariantOutput.tsv --out demo/out`
 
-Run command:
+
+## Estimate purity
+python3 estimate_purity.py --vcf T1.dna.hard-filtered.vcf --cvo T1_CombinedVariantOutput.tsv \
+        --del-ratio CDKN2A=0.32 --del-ratio CDKN2B=0.36
+
+python3 estimate_purity.py --vcf T2.dna.hard-filtered.vcf --cvo T2_CombinedVariantOutput.tsv \
+        --del-ratio CDKN2A=0.77 --del-ratio CDKN2B=0.84
+## Run Script: 
 
 python3 clonality_check.py \
    --t1-vcf T1.dna.hard-filtered.vcf  --t2-vcf T2.dna.hard-filtered.vcf \
@@ -23,6 +31,9 @@ python3 clonality_check.py \
    --targets TSO500_targets.bed --genome hg19 \
    --purity1 0.70 --purity2 0.30 \
    --out results
+
+
+
 ## Inputs from the TSO500 run folder
 
 * BAM + BAI for T1 and T2 (`Logs_Intermediates/StitchedRealigned/<sample>/<sample>.bam` or the DRAGEN `*.bam`)
