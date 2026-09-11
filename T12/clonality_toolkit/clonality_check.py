@@ -390,17 +390,44 @@ def clonality_lr(shared, panel_size_bp, n_som_t1, n_som_t2):
     test with a proper reference set.
     """
     per_site = max(n_som_t1, n_som_t2, 1) / max(panel_size_bp, 1) / 3.0
+    shared = shared.copy()
+    shared["event_id"] = collapse_events(shared)
     log10lr = 0.0
     contribs = []
+    seen = set()
     for _, r in shared.iterrows():
         p = r["hotspot_freq"] if not pd.isna(r["hotspot_freq"]) else per_site
         p = min(max(p, 1e-9), 0.5)
         c = -math.log10(p)
+        if r["event_id"] in seen:      # same complex indel written as several VCF records
+            c = 0.0
+        seen.add(r["event_id"])
         contribs.append(c)
         log10lr += c
-    shared = shared.copy()
     shared["log10_LR_contribution"] = contribs
     return log10lr, shared
+
+
+def collapse_events(df, window=30):
+    """Assign one event id to VCF records that are within `window` bp on the same
+    chromosome and involve an indel or MNV (DRAGEN writes complex indels as several
+    overlapping records).  SNVs are never merged with each other."""
+    ids = {}
+    n = 0
+    rows = sorted(df.itertuples(), key=lambda r: (r.key.split(":")[0], int(r.key.split(":")[1])))
+    last_chrom, last_pos, last_id, last_indel = None, -10**9, None, False
+    for r in rows:
+        chrom, pos, ref, alt = r.key.split(":")[:4]
+        pos = int(pos)
+        indel = len(ref) != 1 or len(alt) != 1
+        if chrom == last_chrom and pos - last_pos <= window and indel and last_indel:
+            ids[r.key] = last_id
+        else:
+            n += 1
+            ids[r.key] = f"E{n}"
+            last_id = f"E{n}"
+        last_chrom, last_pos, last_indel = chrom, pos, indel
+    return [ids[k] for k in df.key]
 
 
 # --------------------------------------------------------------------------- #
@@ -782,9 +809,11 @@ def main():
     n2 = len(shared) + len(p2)
     log10lr, shared_lr = clonality_lr(shared, a.panel_size_bp, n1, n2)
     shared_lr.to_csv(os.path.join(a.out, "shared_variants_LR.tsv"), sep="\t", index=False, float_format="%.4f")
-    n_priv_shared = int((shared.variant_class == "PRIVATE").sum())
+    n_events = shared_lr.event_id.nunique() if not shared_lr.empty else 0
+    n_priv_shared = int(shared_lr.drop_duplicates("event_id").variant_class.eq("PRIVATE").sum()) if n_events else 0
     R("-" * 78)
     R("STEP 6  CLONALITY LIKELIHOOD (same clone vs independent tumors)")
+    R(f"  distinct shared events (overlapping indel records merged): {n_events}")
     R(f"  log10 LR = {log10lr:.2f}   (>=3 strong, 1-3 moderate, <1 uninformative)")
     if n_priv_shared >= 2 or log10lr >= 3:
         verdict = "CLONALLY RELATED (same neoplasm / subclone / metastasis)"
